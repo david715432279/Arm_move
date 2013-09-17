@@ -68,6 +68,7 @@ using namespace planning_models;
 using namespace geometry_msgs;
 
 typedef double ValType;
+bool inited = false;
 
 static const string VIS_TOPIC_NAME = "planning_components_visualizer";
 //static const string VIS_TOPIC_NAME = "arm_move";
@@ -99,6 +100,7 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg);
 bool joy_flag = false;
 bool speed_control_flag = false;
 visualization_msgs::InteractiveMarkerFeedback msg;
+visualization_msgs::InteractiveMarkerFeedback initmsg_state;
 visualization_msgs::InteractiveMarkerFeedback last_good_msg;
 
 struct Pos{
@@ -1056,6 +1058,17 @@ class PlanningComponentsVisualizer
         }
         ik_req.ik_request = ik_request;
         ik_req.timeout = ros::Duration(0.2);
+		if(!inited){
+			initmsg_state.pose.position.x = ik_request.pose_stamped.pose.position.x;	
+			initmsg_state.pose.position.y = ik_request.pose_stamped.pose.position.y;	
+			initmsg_state.pose.position.z = ik_request.pose_stamped.pose.position.z;	
+			initmsg_state.pose.orientation.x = ik_request.pose_stamped.pose.orientation.x;
+			initmsg_state.pose.orientation.y = ik_request.pose_stamped.pose.orientation.y;
+			initmsg_state.pose.orientation.z = ik_request.pose_stamped.pose.orientation.z;
+			initmsg_state.pose.orientation.w = ik_request.pose_stamped.pose.orientation.w;
+			msg = initmsg_state;
+			last_good_msg = msg;
+		}
         if(!gc.coll_aware_ik_service_.call(ik_req, ik_res))
         {
           ROS_INFO("Problem with ik service call");
@@ -1069,10 +1082,19 @@ class PlanningComponentsVisualizer
         joint_names = ik_res.solution.joint_state.name;
         gc.joint_names_.clear();
         gc.joint_names_ = joint_names;
-        for(unsigned int i = 0; i < ik_res.solution.joint_state.name.size(); i++)
-        {
-          joint_values[ik_res.solution.joint_state.name[i]] = ik_res.solution.joint_state.position[i];
-        }
+		if(ik_request.pose_stamped.pose.position.x == initmsg_state.pose.position.x && ik_request.pose_stamped.pose.position.y == initmsg_state.pose.position.y && ik_request.pose_stamped.pose.position.z == ik_request.pose_stamped.pose.position.z)
+		{
+        	for(unsigned int i = 0; i < ik_res.solution.joint_state.name.size(); i++)
+        	{
+          		joint_values[ik_res.solution.joint_state.name[i]] = 0;
+        	}
+		}
+		else{
+        	for(unsigned int i = 0; i < ik_res.solution.joint_state.name.size(); i++)
+        	{
+          		joint_values[ik_res.solution.joint_state.name[i]] = ik_res.solution.joint_state.position[i];
+        	}
+		}
 
       }
       else
@@ -1156,6 +1178,51 @@ class PlanningComponentsVisualizer
       joint_state_lock_.unlock();
 
     }
+	
+    /////
+    /// @brief reset the joint states of the given group collection to the robot state publisher.
+    /// @param gc the group collection to publish the states for.
+    /////
+    void resetJointStates(GroupCollection& gc)
+    {
+      sensor_msgs::JointState msg;
+      msg.header.frame_id =  cm_->getWorldFrameId();
+      msg.header.stamp = ros::Time::now();
+
+      vector<KinematicState::JointState*> jointStates = gc.getState(ik_control_type_)->getJointStateVector();
+
+     // map<string, double> stateMap;
+     // gc.getState(ik_control_type_)->getKinematicStateValues(stateMap);
+     // robot_state_->setKinematicState(stateMap);
+
+      for(size_t i = 0; i < jointStates.size(); i++)
+      {
+        KinematicState::JointState* state = jointStates[i];
+        msg.name.push_back(state->getName());
+
+        // Assume that joints only have one value.
+		msg.position.push_back(0.0f);;
+      }
+      joint_state_lock_.lock();
+      last_joint_state_msg_ = msg;
+      joint_state_lock_.unlock();
+
+    joint_state_lock_.lock();
+    last_joint_state_msg_.header.frame_id =  cm_->getWorldFrameId();
+    last_joint_state_msg_.header.stamp = ros::Time::now();
+    joint_state_publisher_.publish(msg);
+    joint_state_lock_.unlock();
+
+    if(cm_->getWorldFrameId() != cm_->getRobotFrameId()) {
+      TransformStamped trans;
+      trans.header.frame_id = cm_->getWorldFrameId();
+      trans.header.stamp = ros::Time::now();
+      trans.child_frame_id = cm_->getRobotFrameId();
+      trans.transform.rotation.w = 1.0;
+      transform_broadcaster_.sendTransform(trans);
+    }
+    }
+
   void publishJointStates() {
     joint_state_lock_.lock();
     last_joint_state_msg_.header.frame_id =  cm_->getWorldFrameId();
@@ -2545,25 +2612,14 @@ class PlanningComponentsVisualizer
 
 PlanningComponentsVisualizer* pcv;
 
-bool inited = false;
 
 void joy_posreset(){
-  msg.pose.position.x = 0.0243382658809f;
-  msg.pose.position.y = 0.752697825432f;
-  msg.pose.position.z = -0.0571374520659f;
-  msg.pose.orientation.x = -4.7003992222e-05f; 
-  msg.pose.orientation.y = 0.707107484341f; 
-  msg.pose.orientation.z = 0.707106053829f; 
-  msg.pose.orientation.w = 5.58522733627e-05f; 
-  last_good_msg.pose.position.x = 0.0243382658809f;
-  last_good_msg.pose.position.y = 0.752697825432f;
-  last_good_msg.pose.position.z = -0.0571374520659f;
-  last_good_msg.pose.orientation.x = -4.7003992222e-05f; 
-  last_good_msg.pose.orientation.y = 0.707107484341f; 
-  last_good_msg.pose.orientation.z = 0.707106053829f; 
-  last_good_msg.pose.orientation.w = 5.58522733627e-05f; 
-
-  joy_flag = true;
+  msg = initmsg_state;
+ /* for(size_t i = 0; i < pcv->getNumPlanningGroups(); i++)
+  {
+    pcv->resetJointStates((*pcv->getPlanningGroup(i)));
+  }*/
+ // joy_flag = true;
    if(inited&&joy_flag)
 	     pcv->processInteractiveFeedbackjoy(&msg);
   joy_flag = false;
@@ -2571,17 +2627,6 @@ void joy_posreset(){
 }
 
 void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
-
-    struct Pos posjoy = {0,0,0};
-    struct Roz rozjoy = {0,0,0,0};
-	struct Pos posmsg = {0,0,0};
-	struct Roz roztemp;
-	struct Roz rozEnd;
-
-	roztemp.x = msg.pose.orientation.x;
-	roztemp.y = msg.pose.orientation.y;
-	roztemp.z = msg.pose.orientation.z;
-	roztemp.w = msg.pose.orientation.w;
 
 	if(joymsg->axes[0]==0 && joymsg->axes[1]==0 && joymsg->axes[2] == 0 && joymsg->buttons[0]==0 && joymsg->buttons[1]==0){
 		joy_flag = false;
@@ -2595,25 +2640,19 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
         //the button 0 control the ROZ or the POS
 	if(joymsg->buttons[0]==0){
 		if(joymsg->axes[1]>=0.1f || joymsg->axes[1]<=-0.1f){
-           // posjoy.z = joymsg->axes[1]*POS_CONTROL_PRECISION*0.5;
 			joy_pos_speed.x = 0;
 			joy_pos_speed.y = 0;
 			joy_pos_speed.z = joymsg->axes[1];
-	    //		joy_flag = true;	
 		}
 		else if(joymsg->axes[0]>=0.1f || joymsg->axes[0]<=-0.1f){
 			joy_pos_speed.z = 0;
 			joy_pos_speed.y = 0;
 			joy_pos_speed.x = joymsg->axes[0];
-        //    posjoy.x = joymsg->axes[0]*POS_CONTROL_PRECISION*0.5;
-	    //		joy_flag = true;	
 		}
 		else if(joymsg->axes[2]>=0.1f || joymsg->axes[2]<=-0.1f){
 			joy_pos_speed.z = 0;
 			joy_pos_speed.x = 0;
 			joy_pos_speed.y = joymsg->axes[2];
-         //   posjoy.y = joymsg->axes[2]*POS_CONTROL_PRECISION*0.5;
-	    //		joy_flag = true;	
 		}
 		else{
 			joy_pos_speed.x = 0;
@@ -2623,51 +2662,22 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 			joy_roz_speed.x = 0;
 			joy_roz_speed.y = 0;
 			joy_roz_speed.z = 0;
-		/*  posmsg = posMove(roztemp, posjoy);
-		  msg.pose.position.x += posmsg.x;
-		  msg.pose.position.y += posmsg.y;
-		  msg.pose.position.z += posmsg.z;*/
-
 	}
 	else{
 	if(joymsg->axes[1]>=0.1f || joymsg->axes[1]<=-0.1f){
-			joy_roz_speed.z = joymsg->axes[1];
 			joy_roz_speed.x = 0;
 			joy_roz_speed.y = 0;
-        /*  rozjoy.w = cos(joymsg->axes[1]*POS_CONTROL_PRECISION/2);
-			rozjoy.z = sin(joymsg->axes[1]*POS_CONTROL_PRECISION/2);
-    		joy_flag = true;	
-        rozEnd =  rozMove(roztemp, rozjoy);
-        msg.pose.orientation.x = rozEnd.x;
-        msg.pose.orientation.y = rozEnd.y;
-        msg.pose.orientation.z = rozEnd.z;
-        msg.pose.orientation.w = rozEnd.w;*/
+			joy_roz_speed.z = joymsg->axes[1];
 	}
 	else if(joymsg->axes[0]>=0.1f || joymsg->axes[0]<=-0.1f){
-        /*    rozjoy.w = cos(joymsg->axes[0]*POS_CONTROL_PRECISION/2);
-			rozjoy.x = sin(joymsg->axes[0]*POS_CONTROL_PRECISION/2);
-    		joy_flag = true;	*/
 			joy_roz_speed.z = 0;
 			joy_roz_speed.y = 0;
 			joy_roz_speed.x = joymsg->axes[0];
-   /*     rozEnd =  rozMove(roztemp, rozjoy);
-        msg.pose.orientation.x = rozEnd.x;
-        msg.pose.orientation.y = rozEnd.y;
-        msg.pose.orientation.z = rozEnd.z;
-        msg.pose.orientation.w = rozEnd.w;*/
 	}
 	else if(joymsg->axes[2]>=0.1f || joymsg->axes[2]<=-0.1f){
-   /*         rozjoy.w = cos(joymsg->axes[2]*POS_CONTROL_PRECISION/2);
-		    rozjoy.y = sin(joymsg->axes[2]*POS_CONTROL_PRECISION/2);
-    		joy_flag = true;	*/
 			joy_roz_speed.z = 0;
 			joy_roz_speed.x = 0;
 			joy_roz_speed.y = joymsg->axes[2];
-   /*     rozEnd =  rozMove(roztemp, rozjoy);
-        msg.pose.orientation.x = rozEnd.x;
-        msg.pose.orientation.y = rozEnd.y;
-        msg.pose.orientation.z = rozEnd.z;
-        msg.pose.orientation.w = rozEnd.w;*/
 	}
 	else{
 			joy_roz_speed.x = 0;
@@ -2678,17 +2688,6 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 			joy_pos_speed.y = 0;
 			joy_pos_speed.z = 0;
 	}
-/*
-    if(inited&&joy_flag){
-	      if(pcv->processInteractiveFeedbackjoy(&msg)){
-			  last_good_msg = msg;
-		  }
-		  else{
-			  pcv->processInteractiveFeedbackjoy(&last_good_msg);
-			  msg = last_good_msg; 
-		  }
-		
-	}*/
 	joy_flag = false;
 }
 
@@ -2721,7 +2720,7 @@ void speed_control_function()
 	}else{
 
 	if(joy_roz_speed.z){
-		ROS_INFO("david huang\n");
+//		ROS_INFO("david huang\n");
     	rozjoy.w = cos(joy_roz_speed.z*roz_control_speed/2);
 		rozjoy.z = sin(joy_roz_speed.z*roz_control_speed/2);
 		rozjoy.x = 0;
@@ -2923,7 +2922,8 @@ int main(int argc, char** argv)
 
   msg.event_type = InteractiveMarkerFeedback::POSE_UPDATE;
   last_good_msg.event_type = InteractiveMarkerFeedback::POSE_UPDATE;
-  msg.pose.position.x = 0.0243382658809f;
+  initmsg_state.event_type = InteractiveMarkerFeedback::POSE_UPDATE;
+ /* msg.pose.position.x = ;
   msg.pose.position.y = 0.752697825432f;
   msg.pose.position.z = -0.0571374520659f;
   msg.pose.orientation.x = -4.7003992222e-05f; 
@@ -2936,7 +2936,7 @@ int main(int argc, char** argv)
   last_good_msg.pose.orientation.x = -4.7003992222e-05f; 
   last_good_msg.pose.orientation.y = 0.707107484341f; 
   last_good_msg.pose.orientation.z = 0.707106053829f; 
-  last_good_msg.pose.orientation.w = 5.58522733627e-05f; 
+  last_good_msg.pose.orientation.w = 5.58522733627e-05f; */
 
   joy_flag = true;
 /*  msg.pose.position.x = 0.051679f;
@@ -2946,7 +2946,6 @@ int main(int argc, char** argv)
   msg.pose.orientation.y = 0.707107f; 
   msg.pose.orientation.z = 0.707106f; 
   msg.pose.orientation.w = 0.000056f; */
-  inited = true;
 
   for(size_t i = 0; i < pcv->getNumPlanningGroups(); i++)
   {
@@ -2954,6 +2953,7 @@ int main(int argc, char** argv)
     pcv->solveIKForEndEffectorPose((*pcv->getPlanningGroup(i)));
     pcv->updateJointStates((*pcv->getPlanningGroup(i)));
   }
+  inited = true;
 
   ros::waitForShutdown();
 
