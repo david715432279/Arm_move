@@ -97,8 +97,6 @@ typedef map<string, MenuHandler> MenuHandlerMap;
 
 
 void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg);
-bool joy_flag = false;
-bool speed_control_flag = false;
 visualization_msgs::InteractiveMarkerFeedback msg;
 visualization_msgs::InteractiveMarkerFeedback initmsg_state;
 visualization_msgs::InteractiveMarkerFeedback last_good_msg;
@@ -117,6 +115,7 @@ struct Roz{
 };
 
 struct Pos joy_pos_speed = {0,0,0};
+struct Pos joy_world_pos_speed = {0,0,0};
 struct Pos joy_roz_speed = {0,0,0};
 struct Roz euler_angles2xyzw(double phi, double theta, double psi);
 struct Pos posMove(struct Roz endOri, struct Pos posB);
@@ -2615,21 +2614,13 @@ PlanningComponentsVisualizer* pcv;
 
 void joy_posreset(){
   msg = initmsg_state;
- /* for(size_t i = 0; i < pcv->getNumPlanningGroups(); i++)
-  {
-    pcv->resetJointStates((*pcv->getPlanningGroup(i)));
-  }*/
- // joy_flag = true;
-   if(inited&&joy_flag)
-	     pcv->processInteractiveFeedbackjoy(&msg);
-  joy_flag = false;
-  speed_control_flag = true;
+//   if(inited&&joy_flag)
+//	     pcv->processInteractiveFeedbackjoy(&msg);
 }
 
 void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 
-	if(joymsg->axes[0]==0 && joymsg->axes[1]==0 && joymsg->axes[2] == 0 && joymsg->buttons[0]==0 && joymsg->buttons[1]==0){
-		joy_flag = false;
+	if(joymsg->axes[0]==0 && joymsg->axes[1]==0 && joymsg->axes[2] == 0 && joymsg->buttons[0]==0 && joymsg->buttons[1]==0 && joymsg->buttons[2]==0){
 		return;
 	}
         //buttons 1 is the reset button to reset the position of  the arm
@@ -2637,6 +2628,35 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 		joy_posreset();
 		return;
 	}
+	if(joymsg->buttons[2] == 1){
+		if(joymsg->axes[0]>=0.1f || joymsg->axes[0]<=-0.1f){
+			joy_world_pos_speed.x = -joymsg->axes[0];
+			joy_world_pos_speed.y = 0;
+			joy_world_pos_speed.z = 0;
+		}
+		else if(joymsg->axes[1]>=0.1f || joymsg->axes[1]<=-0.1f){
+			joy_world_pos_speed.x = 0;
+			joy_world_pos_speed.z = -joymsg->axes[1];
+			joy_world_pos_speed.y = 0;
+		}
+		else if(joymsg->axes[2]>=0.1f || joymsg->axes[2]<=-0.1f){
+			joy_world_pos_speed.x = 0;
+			joy_world_pos_speed.y = joymsg->axes[2];
+			joy_world_pos_speed.z = 0;
+		}else{
+			joy_world_pos_speed.x = 0;
+			joy_world_pos_speed.y = 0;
+			joy_world_pos_speed.z = 0;
+		}
+			joy_pos_speed.x = 0;
+			joy_pos_speed.y = 0;
+			joy_pos_speed.z = 0;
+			joy_roz_speed.x = 0;
+			joy_roz_speed.y = 0;
+			joy_roz_speed.z = 0;
+		return;	
+	}
+
         //the button 0 control the ROZ or the POS
 	if(joymsg->buttons[0]==0){
 		if(joymsg->axes[1]>=0.1f || joymsg->axes[1]<=-0.1f){
@@ -2662,6 +2682,10 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 			joy_roz_speed.x = 0;
 			joy_roz_speed.y = 0;
 			joy_roz_speed.z = 0;
+			joy_world_pos_speed.x = 0;
+			joy_world_pos_speed.y = 0;
+			joy_world_pos_speed.z = 0;
+			return;
 	}
 	else{
 	if(joymsg->axes[1]>=0.1f || joymsg->axes[1]<=-0.1f){
@@ -2687,8 +2711,11 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 			joy_pos_speed.x = 0;
 			joy_pos_speed.y = 0;
 			joy_pos_speed.z = 0;
+			joy_world_pos_speed.x = 0;
+			joy_world_pos_speed.y = 0;
+			joy_world_pos_speed.z = 0;
+			return;
 	}
-	joy_flag = false;
 }
 
 void speed_control_function()
@@ -2708,8 +2735,12 @@ void speed_control_function()
   	roztemp.y = msg.pose.orientation.y;
   	roztemp.z = msg.pose.orientation.z;
   	roztemp.w = msg.pose.orientation.w;
-
-	if(joy_roz_speed.x == 0 && joy_roz_speed.y ==0 && joy_roz_speed.z == 0){
+    if(joy_world_pos_speed.x!=0||joy_world_pos_speed.y!=0||joy_world_pos_speed.z!=0){
+    	msg.pose.position.x += joy_world_pos_speed.x*control_speed;
+    	msg.pose.position.y += joy_world_pos_speed.y*control_speed;
+    	msg.pose.position.z += joy_world_pos_speed.z*control_speed;
+	}	
+	else if(joy_roz_speed.x == 0 && joy_roz_speed.y ==0 && joy_roz_speed.z == 0){
   		posjoy.z = joy_pos_speed.z*control_speed;
   		posjoy.x = joy_pos_speed.x*control_speed;
   		posjoy.y = joy_pos_speed.y*control_speed;
@@ -2717,10 +2748,8 @@ void speed_control_function()
     	msg.pose.position.x += posmsg.x;
     	msg.pose.position.y += posmsg.y;
     	msg.pose.position.z += posmsg.z;
-	}else{
-
-	if(joy_roz_speed.z){
-//		ROS_INFO("david huang\n");
+	}
+	else if(joy_roz_speed.z){
     	rozjoy.w = cos(joy_roz_speed.z*roz_control_speed/2);
 		rozjoy.z = sin(joy_roz_speed.z*roz_control_speed/2);
 		rozjoy.x = 0;
@@ -2752,7 +2781,6 @@ void speed_control_function()
     	msg.pose.orientation.y = rozEnd.y;
     	msg.pose.orientation.z = rozEnd.z;
     	msg.pose.orientation.w = rozEnd.w;
-	}
 	}
 
     if(inited){
@@ -2871,9 +2899,6 @@ struct Roz rozMove(struct Roz endOri, struct Roz relOri){
 	result.y = PosC_A[2];
 	result.z = PosC_A[3];
 	
-  //  std::cout<<"PosB_C is"<<PosB_C<<std::endl;
-   // std::cout<<"q is"<<q<<std::endl;
-   // std::cout<<"PosB_A is"<<PosC_A<<std::endl;
 	return result;
 }
 
@@ -2884,7 +2909,6 @@ void update_function()
   {
     if(inited)
     {
-      //pcv->sendTransforms();
       if(counter % CONTROL_SPEED == 0)
       {
         counter = 1;
@@ -2938,14 +2962,6 @@ int main(int argc, char** argv)
   last_good_msg.pose.orientation.z = 0.707106053829f; 
   last_good_msg.pose.orientation.w = 5.58522733627e-05f; */
 
-  joy_flag = true;
-/*  msg.pose.position.x = 0.051679f;
-  msg.pose.position.y = 0.602046f;
-  msg.pose.position.z = -0.057133f;
-  msg.pose.orientation.x = 0.000047f; 
-  msg.pose.orientation.y = 0.707107f; 
-  msg.pose.orientation.z = 0.707106f; 
-  msg.pose.orientation.w = 0.000056f; */
 
   for(size_t i = 0; i < pcv->getNumPlanningGroups(); i++)
   {
