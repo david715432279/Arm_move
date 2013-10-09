@@ -68,7 +68,8 @@ using namespace planning_models;
 using namespace geometry_msgs;
 
 typedef double ValType;
-bool inited = false;
+int inited = 0;
+int planning_init = 0;
 
 static const string VIS_TOPIC_NAME = "planning_components_visualizer";
 //static const string VIS_TOPIC_NAME = "arm_move";
@@ -98,8 +99,9 @@ typedef map<string, MenuHandler> MenuHandlerMap;
 
 void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg);
 visualization_msgs::InteractiveMarkerFeedback msg;
-visualization_msgs::InteractiveMarkerFeedback initmsg_state;
+visualization_msgs::InteractiveMarkerFeedback initmsg_state[2];
 visualization_msgs::InteractiveMarkerFeedback last_good_msg;
+visualization_msgs::InteractiveMarkerFeedback arm_pose[2];
 
 struct Pos{
     double x;
@@ -998,6 +1000,23 @@ class PlanningComponentsVisualizer
     path_constraint.absolute_yaw_tolerance = M_PI;
   }
 
+  bool poseEqu(kinematics_msgs::PositionIKRequest *a, visualization_msgs::InteractiveMarkerFeedback *b){
+ 			if(a->pose_stamped.pose.position.x!=b->pose.position.x)
+		 			return false;
+	 		if(a->pose_stamped.pose.position.y!=b->pose.position.y)
+		 			return false;
+	 		if(a->pose_stamped.pose.position.z!=b->pose.position.z)
+		 			return false;
+	 		if(a->pose_stamped.pose.orientation.x!=b->pose.orientation.x)
+		 			return false;
+	 		if(a->pose_stamped.pose.orientation.y!=b->pose.orientation.y)
+		 			return false;
+	 		if(a->pose_stamped.pose.orientation.z!=b->pose.orientation.z)
+		 			return false;
+	 		if(a->pose_stamped.pose.orientation.w!=b->pose.orientation.w)
+		 			return false;
+	 		return true;
+  }
 
   bool solveIKForEndEffectorPose(PlanningComponentsVisualizer::GroupCollection& gc, bool coll_aware = true,
                                  bool constrain_pitch_and_roll = false, double change_redundancy = 0.0)
@@ -1057,15 +1076,15 @@ class PlanningComponentsVisualizer
         }
         ik_req.ik_request = ik_request;
         ik_req.timeout = ros::Duration(0.2);
-		if(!inited){
-			initmsg_state.pose.position.x = ik_request.pose_stamped.pose.position.x;	
-			initmsg_state.pose.position.y = ik_request.pose_stamped.pose.position.y;	
-			initmsg_state.pose.position.z = ik_request.pose_stamped.pose.position.z;	
-			initmsg_state.pose.orientation.x = ik_request.pose_stamped.pose.orientation.x;
-			initmsg_state.pose.orientation.y = ik_request.pose_stamped.pose.orientation.y;
-			initmsg_state.pose.orientation.z = ik_request.pose_stamped.pose.orientation.z;
-			initmsg_state.pose.orientation.w = ik_request.pose_stamped.pose.orientation.w;
-			msg = initmsg_state;
+		if(!inited && planning_init<=1){
+			initmsg_state[planning_init].pose.position.x = ik_request.pose_stamped.pose.position.x;	
+			initmsg_state[planning_init].pose.position.y = ik_request.pose_stamped.pose.position.y;	
+			initmsg_state[planning_init].pose.position.z = ik_request.pose_stamped.pose.position.z;	
+			initmsg_state[planning_init].pose.orientation.x = ik_request.pose_stamped.pose.orientation.x;
+			initmsg_state[planning_init].pose.orientation.y = ik_request.pose_stamped.pose.orientation.y;
+			initmsg_state[planning_init].pose.orientation.z = ik_request.pose_stamped.pose.orientation.z;
+			initmsg_state[planning_init].pose.orientation.w = ik_request.pose_stamped.pose.orientation.w;
+			msg = initmsg_state[planning_init];
 			last_good_msg = msg;
 		}
         if(!gc.coll_aware_ik_service_.call(ik_req, ik_res))
@@ -1081,7 +1100,8 @@ class PlanningComponentsVisualizer
         joint_names = ik_res.solution.joint_state.name;
         gc.joint_names_.clear();
         gc.joint_names_ = joint_names;
-		if(ik_request.pose_stamped.pose.position.x == initmsg_state.pose.position.x && ik_request.pose_stamped.pose.position.y == initmsg_state.pose.position.y && ik_request.pose_stamped.pose.position.z == ik_request.pose_stamped.pose.position.z)
+	//	if(ik_request.pose_stamped.pose.position.x == initmsg_state.pose.position.x && ik_request.pose_stamped.pose.position.y == initmsg_state.pose.position.y && ik_request.pose_stamped.pose.position.z == ik_request.pose_stamped.pose.position.z)
+	    if(inited&&poseEqu(&ik_request, &initmsg_state[inited-1]))
 		{
         	for(unsigned int i = 0; i < ik_res.solution.joint_state.name.size(); i++)
         	{
@@ -1700,6 +1720,12 @@ class PlanningComponentsVisualizer
       return msg.controls.back();
     }
 
+	void change_PlanningGroup(int temp){
+		deleteKinematicStates();	
+		selectPlanningGroup(temp);
+		interactive_marker_server_->applyChanges();
+	}
+
     /////
     /// @brief Creates a clickable, cylinder shaped marker.
     /// @param msg the interactive marker to associate this cylinder with.
@@ -2083,7 +2109,10 @@ class PlanningComponentsVisualizer
             tf::Transform cur = toBulletTransform(feedback->pose);
             setNewEndEffectorPosition(gc, cur, collision_aware_);
       		if(gc.good_ik_solution_){
-		    	interactive_marker_server_->setPose("manipulator", feedback->pose);
+				if(inited==1)
+		    		interactive_marker_server_->setPose("arm4_left_link", feedback->pose);
+				if(inited==2)
+		    		interactive_marker_server_->setPose("arm4_right_link", feedback->pose);
   				/*msg.pose.position.x = feedback->pose.position.x;
   				msg.pose.position.y = feedback->pose.position.y;
   				msg.pose.position.z = feedback->pose.position.z;
@@ -2613,12 +2642,41 @@ PlanningComponentsVisualizer* pcv;
 
 
 void joy_posreset(){
-  msg = initmsg_state;
+  msg = initmsg_state[inited-1];
 //   if(inited&&joy_flag)
 //	     pcv->processInteractiveFeedbackjoy(&msg);
 }
 
+void ik_group_change(){
+	arm_pose[inited-1] = last_good_msg;
+	int temp = inited;
+	inited = 0;
+	usleep(10000);
+	if(temp==2)
+		temp = 0;
+
+	inited = temp+1;
+    msg = arm_pose[inited-1];
+	last_good_msg = msg;
+	pcv->change_PlanningGroup(temp);
+   // msg = arm_pose[inited-1];
+}
+
 void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
+	if(joymsg->buttons[4]){
+		joy_pos_speed.x = 0;
+	 	joy_pos_speed.y = 0;
+	 	joy_pos_speed.z = 0;
+	    joy_roz_speed.x = 0;
+	    joy_roz_speed.y = 0;
+	    joy_roz_speed.z = 0;
+	    joy_world_pos_speed.x = 0;
+	    joy_world_pos_speed.y = 0;
+	    joy_world_pos_speed.z = 0;
+	    ik_group_change();	
+	    return;
+	}
+
 
 	if(joymsg->axes[0]==0 && joymsg->axes[1]==0 && joymsg->axes[2] == 0 && joymsg->buttons[0]==0 && joymsg->buttons[1]==0 && joymsg->buttons[2]==0){
 		return;
@@ -2809,7 +2867,6 @@ void spin_function()
 struct Roz euler_angles2xyzw(double phi, double theta, double psi){
 	struct Roz DRoz;
     double w,x,y,z;
-	double a0,a1,b0,b1,c0,c1,d0,d1;
 
 	x = cos(phi/2)*cos(theta/2)*cos(psi/2)+sin(phi/2)*sin(theta/2)*sin(psi/2);
 	y = sin(phi/2)*cos(theta/2)*cos(psi/2)-cos(phi/2)*sin(theta/2)*sin(psi/2);
@@ -2946,15 +3003,20 @@ int main(int argc, char** argv)
 
   msg.event_type = InteractiveMarkerFeedback::POSE_UPDATE;
   last_good_msg.event_type = InteractiveMarkerFeedback::POSE_UPDATE;
-  initmsg_state.event_type = InteractiveMarkerFeedback::POSE_UPDATE;
+  initmsg_state[0].event_type = InteractiveMarkerFeedback::POSE_UPDATE;
+  initmsg_state[1].event_type = InteractiveMarkerFeedback::POSE_UPDATE;
 
   for(size_t i = 0; i < pcv->getNumPlanningGroups(); i++)
   {
     pcv->selectPlanningGroup(i);
     pcv->solveIKForEndEffectorPose((*pcv->getPlanningGroup(i)));
     pcv->updateJointStates((*pcv->getPlanningGroup(i)));
+	planning_init++;
   }
-  inited = true;
+  arm_pose[0] = initmsg_state[0];
+  arm_pose[1] = initmsg_state[1];
+//  pcv->change_PlanningGroup(0);
+  inited = 2;
 
   ros::waitForShutdown();
 
