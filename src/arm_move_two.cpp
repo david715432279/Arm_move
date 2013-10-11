@@ -291,7 +291,7 @@ class PlanningComponentsVisualizer
       vis_marker_publisher_ = nh_.advertise<Marker> (VIS_TOPIC_NAME, 128);
       vis_marker_array_publisher_ = nh_.advertise<MarkerArray> (VIS_TOPIC_NAME + "_array", 128);
       joint_state_publisher_ = nh_.advertise<sensor_msgs::JointState> ("joint_states", 10);
-	  sub_joy_dev = nh_.subscribe("joy",4, jointCallback);
+	  sub_joy_dev = nh_.subscribe("joy",1, jointCallback);
 
       constrain_rp_ = false;
 
@@ -1086,6 +1086,7 @@ class PlanningComponentsVisualizer
 			initmsg_state[planning_init].pose.orientation.w = ik_request.pose_stamped.pose.orientation.w;
 			msg = initmsg_state[planning_init];
 			last_good_msg = msg;
+		//	arm_pose[inited-1] = last_good_msg;
 		}
         if(!gc.coll_aware_ik_service_.call(ik_req, ik_res))
         {
@@ -1101,7 +1102,7 @@ class PlanningComponentsVisualizer
         gc.joint_names_.clear();
         gc.joint_names_ = joint_names;
 	//	if(ik_request.pose_stamped.pose.position.x == initmsg_state.pose.position.x && ik_request.pose_stamped.pose.position.y == initmsg_state.pose.position.y && ik_request.pose_stamped.pose.position.z == ik_request.pose_stamped.pose.position.z)
-	    if(inited&&poseEqu(&ik_request, &initmsg_state[inited-1]))
+	    if(inited>=1&&poseEqu(&ik_request, &initmsg_state[inited-1]))
 		{
         	for(unsigned int i = 0; i < ik_res.solution.joint_state.name.size(); i++)
         	{
@@ -1503,8 +1504,7 @@ class PlanningComponentsVisualizer
     /// @return the handle that was registered
     /////
     MenuHandler::EntryHandle registerMenuEntry(MenuHandler& handler, MenuEntryMap& map, string name)
-    {
-      MenuHandler::EntryHandle toReturn = handler.insert(name, process_function_ptr_);
+    { MenuHandler::EntryHandle toReturn = handler.insert(name, process_function_ptr_);
       map[toReturn] = name;
       return toReturn;
     }
@@ -2055,7 +2055,7 @@ class PlanningComponentsVisualizer
           {
             tf::Transform cur = toBulletTransform(feedback->pose);
             setNewEndEffectorPosition(gc, cur, collision_aware_);
-      	//	if(gc.good_ik_solution_){
+      		if(gc.good_ik_solution_){
   				msg.pose.position.x = feedback->pose.position.x;
   				msg.pose.position.y = feedback->pose.position.y;
   				msg.pose.position.z = feedback->pose.position.z;
@@ -2070,11 +2070,12 @@ class PlanningComponentsVisualizer
   				last_good_msg.pose.orientation.y = feedback->pose.orientation.y; 
   				last_good_msg.pose.orientation.z = feedback->pose.orientation.z; 
   				last_good_msg.pose.orientation.w = feedback->pose.orientation.w; 
+				//arm_pose[inited-1] = last_good_msg;
 				//ROS_INFO("the RVIZ x=%f, y=%f, z=%f, w=%f\n",msg.pose.orientation.x,msg.pose.orientation.y,msg.pose.orientation.z,msg.pose.orientation.w);
 				//compute_euler_angles(msg.pose.orientation.x,msg.pose.orientation.y,msg.pose.orientation.z,msg.pose.orientation.w);
 				//compute_3D_euler_angles(msg.pose.orientation.x,msg.pose.orientation.y,msg.pose.orientation.z,msg.pose.orientation.w);
 					
-		//	}
+			}
             last_ee_poses_[current_group_name_] = feedback->pose;
           }
           else if(is_joint_control_active_ && feedback->marker_name.rfind("_joint_control") != string::npos)
@@ -2642,41 +2643,73 @@ PlanningComponentsVisualizer* pcv;
 
 
 void joy_posreset(){
+ if(inited>=1)
   msg = initmsg_state[inited-1];
 //   if(inited&&joy_flag)
 //	     pcv->processInteractiveFeedbackjoy(&msg);
 }
 
-void ik_group_change(){
+void ik_group_change( int temp){
+	joy_pos_speed.x = 0;
+	joy_pos_speed.y = 0;
+	joy_pos_speed.z = 0;
+	joy_roz_speed.x = 0;
+	joy_roz_speed.y = 0;
+	joy_roz_speed.z = 0;
+	joy_world_pos_speed.x = 0;
+	joy_world_pos_speed.y = 0;
+	joy_world_pos_speed.z = 0;
+	planning_init = 3;
+	usleep(10000);
+//save the last good msg for this point
+    if(inited)
 	arm_pose[inited-1] = last_good_msg;
-	int temp = inited;
+
 	inited = 0;
 	usleep(10000);
-	if(temp==2)
-		temp = 0;
 
 	inited = temp+1;
     msg = arm_pose[inited-1];
 	last_good_msg = msg;
 	pcv->change_PlanningGroup(temp);
+	planning_init = 2;
    // msg = arm_pose[inited-1];
 }
 
 void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
-	if(joymsg->buttons[4]){
+// you can't control the arm when your want control other things
+	if(joymsg->axes[5]!=0){
 		joy_pos_speed.x = 0;
-	 	joy_pos_speed.y = 0;
-	 	joy_pos_speed.z = 0;
-	    joy_roz_speed.x = 0;
-	    joy_roz_speed.y = 0;
-	    joy_roz_speed.z = 0;
-	    joy_world_pos_speed.x = 0;
-	    joy_world_pos_speed.y = 0;
-	    joy_world_pos_speed.z = 0;
-	    ik_group_change();	
-	    return;
+		joy_pos_speed.y = 0;
+		joy_pos_speed.z = 0;
+		joy_roz_speed.x = 0;
+		joy_roz_speed.y = 0;
+		joy_roz_speed.z = 0;
+		joy_world_pos_speed.x = 0;
+		joy_world_pos_speed.y = 0;
+		joy_world_pos_speed.z = 0;
+		usleep(10000);
+		planning_init = 3;
+		if(inited)
+			arm_pose[inited-1] = last_good_msg;
+		inited = 0;
+		usleep(10000);
 	}
 
+// when your enter the axes 4 button your can control the left/right side	
+	if(joymsg->axes[4]!=0){
+		if(joy_pos_speed.x!=0||joy_pos_speed.y!=0||joy_pos_speed.z!=0)
+			return;
+		if(joy_roz_speed.x!=0||joy_roz_speed.y!=0||joy_roz_speed.z!=0)
+			return;
+		if(joy_world_pos_speed.x!=0||joy_world_pos_speed.y!=0||joy_world_pos_speed.z!=0)
+			return;
+		if(joymsg->axes[4]==-1&&inited!=1)
+	    	ik_group_change(0);	
+		if(joymsg->axes[4]==1&&inited!=2)
+	    	ik_group_change(1);	
+	    return;
+	}
 
 	if(joymsg->axes[0]==0 && joymsg->axes[1]==0 && joymsg->axes[2] == 0 && joymsg->buttons[0]==0 && joymsg->buttons[1]==0 && joymsg->buttons[2]==0){
 		return;
@@ -2686,6 +2719,7 @@ void jointCallback(const sensor_msgs::Joy::ConstPtr& joymsg){
 		joy_posreset();
 		return;
 	}
+
 	if(joymsg->buttons[2] == 1){
 		if(joymsg->axes[0]>=0.1f || joymsg->axes[0]<=-0.1f){
 			joy_world_pos_speed.x = -joymsg->axes[0];
@@ -2841,9 +2875,10 @@ void speed_control_function()
     	msg.pose.orientation.w = rozEnd.w;
 	}
 
-    if(inited){
+    if(inited&&planning_init == 2){
 	      if(pcv->processInteractiveFeedbackjoy(&msg)){
 			  last_good_msg = msg;
+			 // arm_pose[inited-1] = last_good_msg;
 		  }
 		  else{
 			  pcv->processInteractiveFeedbackjoy(&last_good_msg);
